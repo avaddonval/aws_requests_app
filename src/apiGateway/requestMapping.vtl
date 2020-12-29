@@ -1,0 +1,7 @@
+#set($inputRoot = $input.path('$'))
+{
+  "name" : "$util.escapeJavaScript($inputRoot.name)",
+  "email" : "$util.escapeJavaScript($inputRoot.email)",
+  "phone" : "$util.escapeJavaScript($inputRoot.phone)",
+  "password" : "$util.escapeJavaScript($inputRoot.password)"
+}
