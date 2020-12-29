@@ -112,9 +112,10 @@ async function deploy(){
         restApiId: restApi.id, 
         statusCode: '200'
       }).promise();
+      
     } else { throw err }
   });
-  let checkGetRequestsMethod = await apigateway.getMethod({
+  /*let checkGetRequestsMethod = await apigateway.getMethod({
     httpMethod: 'GET', 
     resourceId: resources.items[0].id, 
     restApiId: restApi.id, 
@@ -158,9 +159,24 @@ async function deploy(){
       }).promise();
       console.log(response)
     } else { throw err }
-  });
-  
-  
+  });*/
+  let deployments = await apigateway.getDeployments({
+    restApiId: restApi.id, 
+  }).promise()
+  if(!deployments.items || !deployments.items.length){
+    let deployment = await apigateway.createDeployment({
+      restApiId: restApi.id, 
+      cacheClusterEnabled: false,
+      description: 'prod',
+      stageDescription: 'prod',
+      stageName: 'prod',
+      tracingEnabled: false
+    }).promise().then(data=>{
+      console.log(`API URL: https://${restApi.id}.execute-api.${REGION}.amazonaws.com/prod`)
+    }).catch(err=>{console.log(err)});
+  }
+
+   
   
 }
 async function destroy(){

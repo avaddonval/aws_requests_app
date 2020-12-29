@@ -1,6 +1,6 @@
 {
   "project":{
-    "name": "aw1",
+    "name": "awareness",
     "description": "app for requests",
     "region": "eu-central-1",
     "profile": "my-aws-dollar"

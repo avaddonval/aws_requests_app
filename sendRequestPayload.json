@@ -2,5 +2,5 @@
   "email":"test@test.com",
   "phone":"+7 777 123 456 789",
   "name":"test",
-  "comment":"test comment"
+  "password":"test comment"
 }
