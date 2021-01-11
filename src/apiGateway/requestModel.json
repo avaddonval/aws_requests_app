@@ -12,7 +12,7 @@
     "phone": {
       "type": "string"
     },
-    "password": {
+    "company": {
       "type": "string"
     }
   }
