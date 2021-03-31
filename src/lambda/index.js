@@ -1,4 +1,6 @@
 //aws s3api create-bucket --bucket <FMI> --region us-west-2 --create-bucket-configuration LocationConstraint=us-west-2
+const fs = require('fs');
+const path = require('path');
 const AWS = require('aws-sdk');
 const config = require('config');
 let credentials = new AWS.SharedIniFileCredentials({profile: config.get('project.profile')});
@@ -7,118 +9,41 @@ AWS.config.update({region: config.get('project.region')});
 const iam = new AWS.IAM();
 const LAMBDA = new AWS.Lambda();
 const S3 = new AWS.S3();
-const fs = require('fs');
-const path = require('path');
 
-const BUCKET_NAME = config.get('project.name')+'-bucket-for-requests';
-const ROLE_NAME = 'lambda-role-'+config.get('project.name');
-const GET_REQUESTS_LAMBDA = 'get_requests'+config.get('project.name')
-const SEND_REQUEST_LAMBDA = 'send_request'+config.get('project.name')
+const pathes = {
+  assumeRolePolicy: path.join(__dirname,'./AssumeRolePolicyDocument.json'),
+  rolePolicy: path.join(__dirname,'./role.json'),
+  sendRequestLambda: path.join(__dirname,'./sendRequest/sendRequest.zip'),
+  getRequestsLambda: path.join(__dirname,'./getRequests/getRequests.zip')
+}
+
+const names = {
+  bucketName: config.get('project.name')+'-bucket-for-requests',
+  roleName: 'lambda-role-'+config.get('project.name'),
+  getRequestsLambdaName: 'get_requests'+config.get('project.name'),
+  sendRequestLambdaName: 'send_request'+config.get('project.name'),
+  sendRequestS3Name: 'sendRequest.zip',
+  getRequestsS3Name: 'getRequests.zip'
+}
 async function deploy(){
-  let roleName = await getRoleName();
-  console.log(roleName)
-  if(!roleName){
-    let lambdaRole = await iam.createRole({
-      AssumeRolePolicyDocument: fs.readFileSync(path.join(__dirname,'./AssumeRolePolicyDocument.json')).toString(),
-      RoleName: ROLE_NAME,
-    }).promise();
-    roleName = await getRoleName();
-  }
-  let checkPolicy = await iam.getRolePolicy({
-    PolicyName: ROLE_NAME+'Policy', 
-    RoleName: ROLE_NAME
-  }).promise().catch(async err=>{
-    if(err.code === 'NoSuchEntity'){
-      let setPoLicy = await iam.putRolePolicy({
-        PolicyDocument: fs.readFileSync(path.join(__dirname,'./role.json')).toString(),
-        PolicyName: ROLE_NAME+'Policy', 
-        RoleName: ROLE_NAME
-      }).promise();
-    }
-    else throw err
-  });
-  
-  console.log('policy set')
-  let sendRequestObject = await S3.putObject({
-    Body: fs.readFileSync(path.join(__dirname,'./sendRequest/sendRequest.zip')), 
-    Bucket: BUCKET_NAME, 
-    Key: 'sendRequest.zip',
-  }).promise();
-  console.log('sendRequest loaded')
-  let getRequestsObject = await S3.putObject({
-    Body: fs.readFileSync(path.join(__dirname,'./getRequests/getRequests.zip')), 
-    Bucket: BUCKET_NAME, 
-    Key: 'getRequests.zip',
-  }).promise();
-  console.log('getRequests loaded')
-  let lambdaPost = await LAMBDA.getFunction({
-    FunctionName: SEND_REQUEST_LAMBDA
-  }).promise().catch(async err=>{
-    if(err.code==='ResourceNotFoundException'){
-      await LAMBDA.createFunction({
-        Code: {
-            S3Bucket: BUCKET_NAME, 
-            S3Key: "sendRequest.zip"
-        },
-        Environment: {
-          Variables: {
-           "BUCKET": BUCKET_NAME, 
-           "REGION": config.get('project.region')
-          }
-        },
-        FunctionName: SEND_REQUEST_LAMBDA, 
-        Handler: "index.handler",
-        Publish: true, 
-        Role: roleName, 
-        Runtime: "nodejs10.x"
-      }).promise();
-      console.log('sendRequest lambda created')
-    } else throw err
-  })
-      
-  
-  let lambdaGet = await LAMBDA.getFunction({
-    FunctionName: GET_REQUESTS_LAMBDA
-  }).promise().catch(async err=>{
-    if(err.code==='ResourceNotFoundException'){
-      await LAMBDA.createFunction({
-        Code: {
-            S3Bucket: BUCKET_NAME, 
-            S3Key: "getRequests.zip"
-        },
-        Environment: {
-          Variables: {
-          "BUCKET": BUCKET_NAME, 
-          "REGION": config.get('project.region')
-          }
-        },
-        FunctionName: GET_REQUESTS_LAMBDA, 
-        Handler: "index.handler",
-        Publish: true, 
-        Role: roleName, 
-        Runtime: "nodejs10.x"
-      }).promise();
-      console.log('getRequests lambda created')
-    } else throw err
-
-  })
+  await createRoleForLambda()
+  await uploadLambdasToS3()
+  await createLambdaFunctions()
 }
 async function destroy(){
   let getFunc = await LAMBDA.deleteFunction({
-    FunctionName: GET_REQUESTS_LAMBDA,
+    FunctionName: names.getRequestsLambdaName,
   }).promise().catch(err=>{console.log(err.code)});
   let sendFunc = await LAMBDA.deleteFunction({
-    FunctionName: SEND_REQUEST_LAMBDA,
+    FunctionName: names.sendRequestLambdaName,
   }).promise().catch(err=>{console.log(err.code)});
   await iam.deleteRolePolicy({
-    PolicyName: ROLE_NAME+'Policy', 
-    RoleName: ROLE_NAME
+    PolicyName: names.roleName+'Policy', 
+    RoleName: names.roleName
   }).promise().catch(err=>{console.log(err.code)});
   let lambdaRole = await iam.deleteRole({
-    RoleName: ROLE_NAME,
+    RoleName: names.roleName,
   }).promise().catch(err=>{console.log(err.code)});
-  
-
 }
 module.exports = {
   deploy,
@@ -137,4 +62,89 @@ async function getRoleName(){
       }
   }
   return ROLE_NAME_STR
+}
+async function cretateIAMRole(){
+  return await iam.createRole({
+    AssumeRolePolicyDocument: fs.readFileSync(pathes.assumeRolePolicy).toString(),
+    RoleName: names.roleName,
+  }).promise();
+}
+async function createRolePolicy(){
+  return await iam.putRolePolicy({
+    PolicyDocument: fs.readFileSync(pathes.rolePolicy).toString(),
+    PolicyName: names.roleName+'Policy', 
+    RoleName: names.roleName
+  }).promise();
+}
+async function createLambdaFunction(s3Key){
+  return await LAMBDA.createFunction({
+    Code: {
+        S3Bucket: names.bucketName, 
+        S3Key: s3Key
+    },
+    Environment: {
+      Variables: {
+       "BUCKET": names.bucketName, 
+       "REGION": config.get('project.region')
+      }
+    },
+    FunctionName: names.sendRequestLambdaName, 
+    Handler: "index.handler",
+    Publish: true, 
+    Role: roleName, 
+    Runtime: "nodejs10.x"
+  }).promise();
+}
+
+async function uploadLambdasToS3(){
+  let sendRequestObject = await S3.putObject({
+    Body: fs.readFileSync(pathes.sendRequestLambda), 
+    Bucket: names.bucketName, 
+    Key: names.sendRequestS3Name,
+  }).promise();
+  console.log('sendRequest loaded')
+
+  let getRequestsObject = await S3.putObject({
+    Body: fs.readFileSync(pathes.getRequestsLambda), 
+    Bucket: names.bucketName, 
+    Key: names.getRequestsS3Name,
+  }).promise();
+  console.log('getRequests loaded')
+}
+
+async function createRoleForLambda(){
+  let roleName = await getRoleName();
+  if(!roleName){
+    let lambdaRole = await cretateIAMRole();
+    roleName = await getRoleName();
+  }
+  let checkPolicy = await iam.getRolePolicy({
+    PolicyName: names.roleName+'Policy', 
+    RoleName: names.roleName
+  }).promise().catch(async err=>{
+    if(err.code === 'NoSuchEntity'){
+      let setPoLicy = createRolePolicy()
+    }
+    else throw err
+  });
+  console.log('policy set')
+}
+async function createLambdaFunctions(){
+  let lambdaPost = await LAMBDA.getFunction({
+    FunctionName: names.sendRequestLambda
+  }).promise().catch(async err=>{
+    if(err.code==='ResourceNotFoundException'){
+      await createLambdaFunction(names.sendRequestS3Name)
+      console.log('sendRequest lambda created')
+    } else throw err
+  })
+  
+  let lambdaGet = await LAMBDA.getFunction({
+    FunctionName: names.getRequestsLambdaName
+  }).promise().catch(async err=>{
+    if(err.code==='ResourceNotFoundException'){
+      await createLambdaFunction(names.getRequestsS3Name)
+      console.log('getRequests lambda created')
+    } else throw err
+  })
 }
